@@ -1,0 +1,6 @@
+{
+    "ServiceSchedulerMain": {
+        "MAIN_TABLE": "usbim-instance-scheduler-ConfigTable-xxxxx",
+        "TRACE": "yes"
+    }
+}

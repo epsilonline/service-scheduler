@@ -1,0 +1,13 @@
+version = 0.1
+[default]
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "service-scheduler-prod"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-xxxx"
+s3_prefix = "service-scheduler-prod"
+region = "eu-west-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+image_repositories = []
+parameter_overrides = "Environment=\"prod\" ScheduleConfigTable=\"usbim-instance-scheduler-ConfigTable-xxxxx\" ScheduleStatusTable=\"usbim-instance-scheduler-StateTable-xxx\" KMSArn=\"arn:aws:kms:eu-west-1:xxxx:key/2344xxxxx\""
+

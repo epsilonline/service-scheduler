@@ -1,0 +1,193 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  service-scheduler
+
+  Starts/stops ECS services and Autoscaling groupd at specified scheduling based on resource tags
+
+Globals:
+  Function:
+    Timeout: 120
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    Description: "Environment"
+  ScheduleConfigTable:
+    Type: String
+    Description: "Name of the dynamodb table which contains schedules configuration"
+  ScheduleStatusTable:
+      Type: String
+      Description: "Name of the dynamodb table which contains schedules status"
+  KMSArn:
+    Type: String
+    Description: "Arn of the KMS key to use for dynamodb decription"
+
+Resources:
+  ServiceSchedulerMain:
+    Type: AWS::Serverless::Function
+    FunctionName: !Sub ServiceScheduler-Main-${Environment}
+    Properties:
+      CodeUri: source/lambda/
+      Handler: main.lambda_handler
+      Runtime: python3.9
+      Role: !GetAtt LambdaRole.Arn
+      Architectures:
+        - x86_64
+      MemorySize: 160
+      Environment:
+        Variables:
+          MAIN_TABLE: !Ref ScheduleConfigTable
+          STATUS_TABLE_NAME: !Ref ScheduleStatusTable
+          TRACE: "no"
+      Events:
+        CloudwatchSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: 'rate(10 minutes)'
+            Name: !Sub service-scheduler-${Environment}
+            Description: Periodic event to check for services to schedule
+            Enabled: true
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        -
+          PolicyName: "Autoscaling"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+               -
+                 Sid: "Autoscaling"
+                 Effect: "Allow"
+                 Action:
+                  - "application-autoscaling:DescribeScalableTargets"
+                  - "application-autoscaling:RegisterScalableTarget"
+                  - "autoscaling:DescribeAutoScalingGroups"
+                  - "autoscaling:UpdateAutoScalingGroup"
+                 Resource: "*"
+        -
+          PolicyName: "ECS"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+               -
+                 Sid: "List"
+                 Effect: "Allow"
+                 Action:
+                  - "ecs:ListClusters"
+                  - "ecs:ListServices"
+                  - "ecs:ListTagsForResource"
+                 Resource: "*"
+               -
+                 Sid: "Services"
+                 Effect: "Allow"
+                 Action:
+                  - "ecs:UpdateService"
+                  - "ecs:DescribeServices"
+                 Resource: !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:service/*"
+        -
+          PolicyName: "ParameterStore"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+               -
+                 Sid: "ParameterStore"
+                 Effect: "Allow"
+                 Action:
+                  - "ssm:GetParameter"
+                  - "ssm:PutParameter"
+                 Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/*"
+        -
+          PolicyName: "DynamoDb"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Sid: "dynamodb"
+                Effect: "Allow"
+                Action:
+                  - "dynamodb:BatchGet*"
+                  - "dynamodb:Get*"
+                  - "dynamodb:Query"
+                  - "dynamodb:Scan"
+                Resource:
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ScheduleConfigTable}"
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ScheduleStatusTable}"
+              - Sid: "UpdateStatusTable"
+                Effect: "Allow"
+                Action:
+                  - "dynamodb:Updateitem"
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ScheduleStatusTable}"
+        -
+          PolicyName: "kms"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Sid: "dynamodb"
+                Effect: "Allow"
+                Action:
+                  - "kms:GenerateDataKey*"
+                  - "kms:Decrypt"
+                Resource: !Ref KMSArn
+        - PolicyName: "RDS_Clusters"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: "List"
+                Effect: "Allow"
+                Action:
+                  - "rds:DescribeDBClusters"
+                  - "rds:ListTagsForResource"
+                  - "rds:DescribeDBInstances"
+                Resource: "*"
+              -
+                Sid: "UpdateCluster"
+                Effect: "Allow"
+                Action:
+                  - "rds:ModifyDBCluster"
+                Resource:
+                - !Sub "arn:aws:rds:${AWS::Region}:${AWS::AccountId}:cluster:*"
+                - !Sub "arn:aws:rds:${AWS::Region}:${AWS::AccountId}:og:*"
+                - !Sub "arn:aws:rds:${AWS::Region}:${AWS::AccountId}:cluster-pg:*"
+        - PolicyName: "DocumentDB_Clusters"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: "StartStopCluster"
+                Effect: "Allow"
+                Action:
+                  - "rds:StopDBCluster"
+                  - "rds:StartDBCluster"
+                Resource:
+                  - !Sub "arn:aws:rds:${AWS::Region}:${AWS::AccountId}:cluster:*"
+        - PolicyName: "TagEditor"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: "GetResources"
+                Effect: "Allow"
+                Action:
+                  - "tag:GetResources"
+                Resource:
+                  - "*"
+
+Outputs:
+  MainFunction:
+    Description: "Main function ARN"
+    Value: !GetAtt ServiceSchedulerMain.Arn
